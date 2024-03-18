@@ -163,14 +163,15 @@ class Module extends AbstractModule
 
         $propertyId = $target->property()->id();
 
-        $routeMatch = $this->getServiceLocator()->get('Application')
-                        ->getMvcEvent()->getRouteMatch();
-        $routeMatchParams = $routeMatch->getParams();
+        /** @var \Omeka\Mvc\Status $status */
+        $services = $this->getServiceLocator();
+        $status = $services->get('Omeka\Status');
+
         //setup the route params to pass to the Url helper. Both the route name and its parameters go here
         $routeParams = [
-                'action' => 'browse',
+            'action' => 'browse',
         ];
-        if ($routeMatch->getParam('__ADMIN__')) {
+        if ($status->isAdminRequest()) {
             $globalSettings = $this->getServiceLocator()->get('Omeka\Settings');
             if ($globalSettings->get('metadata_browse_use_globals')) {
                 $filteredPropertyIds = $globalSettings->get('metadata_browse_properties', []);
@@ -185,12 +186,11 @@ class Module extends AbstractModule
                     $filteredPropertyIds = array_merge($currentSettings, $filteredPropertyIds);
                 }
             }
-
             $routeParams['route'] = 'admin/default';
-        } elseif ($routeMatch->getParam('__SITE__')) {
+        } elseif ($status->isSiteRequest()) {
             $siteSettings = $this->getServiceLocator()->get('Omeka\Settings\Site');
             $filteredPropertyIds = $siteSettings->get('metadata_browse_properties', []);
-            $siteSlug = $routeMatch->getParam('site-slug');
+            $siteSlug = $status->getRouteParam('site-slug');
             $routeParams['route'] = 'site';
             $routeParams['site-slug'] = $siteSlug . '/' . $controllerName;
         } else {
@@ -201,7 +201,6 @@ class Module extends AbstractModule
         $url = $viewHelperManager->get('Url');
         $hyperlink = $viewHelperManager->get('hyperlink');
         if (in_array($propertyId, $filteredPropertyIds)) {
-            $controllerName = $controllerName;
             $routeParams['controller'] = $controllerName;
 
             $translator = $this->getServiceLocator()->get('MvcTranslator');
