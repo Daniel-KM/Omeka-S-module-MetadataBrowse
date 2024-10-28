@@ -34,6 +34,18 @@ class ConfigForm extends Form
                 'id' => 'metadata_browse_direct_links',
             ],
         ]);
+        $this->add([
+            'type' => 'checkbox',
+            'name' => 'metadata_browse_fulltext_search',
+            'options' => [
+                'label' => 'Use full text search', // @translate
+                'info' => 'Redirect to the site wide search page instead of the resource search page.', // @translate
+            ],
+            'attributes' => [
+                'checked' => $this->globalSettings->get('metadata_browse_fulltext_search') ? 'checked' : '',
+                'id' => 'metadata_browse_fulltext_search',
+            ],
+        ]);
     }
 
     public function setGlobalSettings($globalSettings)

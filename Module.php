@@ -111,9 +111,9 @@ class Module extends AbstractModule
         }
         $globalSettings = $this->getServiceLocator()->get('Omeka\Settings');
         $globalSettings->set('metadata_browse_properties', $propertyIds);
-        $globalSettings->set('metadata_browse_use_globals', $params['metadata_browse_use_globals']);
-        $directLinks = $this->getServiceLocator()->get('Omeka\Settings');
-        $directLinks->set('metadata_browse_direct_links', $params['metadata_browse_direct_links']);
+        $globalSettings->set('metadata_browse_use_globals', !empty($params['metadata_browse_use_globals']));
+        $globalSettings->set('metadata_browse_direct_links', !empty($params['metadata_browse_direct_links']));
+        $globalSettings->set('metadata_browse_fulltext_search', !empty($params['metadata_browse_fulltext_search']));
     }
 
     public function getConfigForm(PhpRenderer $renderer)
@@ -150,6 +150,7 @@ class Module extends AbstractModule
 
     public function repValueHtml($event)
     {
+        /** @var \Omeka\Api\Representation\ValueRepresentation $target */
         if ($event->getParam('value')) {
             $target = $event->getParam('value');
         } else {
@@ -168,11 +169,10 @@ class Module extends AbstractModule
         $status = $services->get('Omeka\Status');
 
         //setup the route params to pass to the Url helper. Both the route name and its parameters go here
-        $routeParams = [
-            'action' => 'browse',
-        ];
-        if ($status->isAdminRequest()) {
-            $globalSettings = $this->getServiceLocator()->get('Omeka\Settings');
+        $routeParams = [];
+        $isAdminRequest = $status->isAdminRequest();
+        $globalSettings = $this->getServiceLocator()->get('Omeka\Settings');
+        if ($isAdminRequest) {
             if ($globalSettings->get('metadata_browse_use_globals')) {
                 $filteredPropertyIds = $globalSettings->get('metadata_browse_properties', []);
             } else {
@@ -187,12 +187,25 @@ class Module extends AbstractModule
                 }
             }
             $routeParams['route'] = 'admin/default';
+            $routeParams['controller'] = $controllerName;
+            $routeParams['action'] = 'browse';
+            $useFullTextSearch = false;
         } elseif ($status->isSiteRequest()) {
             $siteSettings = $this->getServiceLocator()->get('Omeka\Settings\Site');
             $filteredPropertyIds = $siteSettings->get('metadata_browse_properties', []);
             $siteSlug = $status->getRouteParam('site-slug');
-            $routeParams['route'] = 'site';
-            $routeParams['site-slug'] = $siteSlug . '/' . $controllerName;
+            $useFullTextSearch = (bool) $globalSettings->get('metadata_browse_fulltext_search');
+            if ($useFullTextSearch) {
+                $route = 'site/resource';
+                $routeParams['site-slug'] = $siteSlug;
+                $routeParams['controller'] = 'index';
+                $routeParams['action'] = 'search';
+            } else {
+                $routeParams['route'] = 'site/resource';
+                $routeParams['site-slug'] = $siteSlug;
+                $routeParams['controller'] = $controllerName;
+                $routeParams['action'] = 'browse';
+            }
         } else {
             return;
         }
@@ -201,54 +214,59 @@ class Module extends AbstractModule
         $url = $viewHelperManager->get('Url');
         $hyperlink = $viewHelperManager->get('hyperlink');
         if (in_array($propertyId, $filteredPropertyIds)) {
-            $routeParams['controller'] = $controllerName;
-
-            $translator = $this->getServiceLocator()->get('MvcTranslator');
             $params = $event->getParams();
+            $translator = $this->getServiceLocator()->get('MvcTranslator');
+
             $isLiteral = false;
-            switch ($target->type()) {
-                case 'resource':
-                    $searchTarget = $target->valueResource()->id();
-                    $searchUrl = $this->resourceSearchUrl($url, $routeParams, $propertyId, $searchTarget);
-                    break;
-                case 'uri':
-                    $searchTarget = $target->uri();
-                    $searchUrl = $this->uriSearchUrl($url, $routeParams, $propertyId, $searchTarget);
-                    break;
-                case 'literal':
+            if ($useFullTextSearch) {
+                if ($valueResource = $target->valueResource()) {
+                    $searchTarget = $valueResource->title();
+                } elseif ($uri = $target->uri()) {
+                    $val = $target->value();
+                    $searchTarget = strlen((string) $val) ? $val : $uri;
+                } else {
                     $searchTarget = $target->value();
-                    $searchUrl = $this->literalSearchUrl($url, $routeParams, $propertyId, $searchTarget);
-                    $isLiteral = true;
-                    break;
-                default:
-                    $resource = $target->valueResource();
-                    $uri = $target->uri();
-                    if ($resource) {
+                }
+                $searchUrl = $url($route, $routeParams, ['query' => ['fulltext_search' => $searchTarget]]);
+            } else {
+                switch ($target->type()) {
+                    case 'resource':
                         $searchTarget = $target->valueResource()->id();
                         $searchUrl = $this->resourceSearchUrl($url, $routeParams, $propertyId, $searchTarget);
-                    } elseif ($uri) {
-                        $searchUrl = $this->uriSearchUrl($url, $routeParams, $propertyId, $uri);
-                    } else {
+                        break;
+                    case 'uri':
+                        $searchTarget = $target->uri();
+                        $searchUrl = $this->uriSearchUrl($url, $routeParams, $propertyId, $searchTarget);
+                        break;
+                    case 'literal':
                         $searchTarget = $target->value();
                         $searchUrl = $this->literalSearchUrl($url, $routeParams, $propertyId, $searchTarget);
                         $isLiteral = true;
-                    }
+                        break;
+                    default:
+                        $resource = $target->valueResource();
+                        $uri = $target->uri();
+                        if ($resource) {
+                            $searchTarget = $target->valueResource()->id();
+                            $searchUrl = $this->resourceSearchUrl($url, $routeParams, $propertyId, $searchTarget);
+                        } elseif ($uri) {
+                            $searchUrl = $this->uriSearchUrl($url, $routeParams, $propertyId, $uri);
+                        } else {
+                            $searchTarget = $target->value();
+                            $searchUrl = $this->literalSearchUrl($url, $routeParams, $propertyId, $searchTarget);
+                            $isLiteral = true;
+                        }
+                }
             }
 
-            switch ($controllerName) {
-                case 'item':
-                    $controllerLabel = 'items';
-                break;
-                case 'item-set':
-                    $controllerLabel = 'item sets';
-                break;
-                default:
-                    $controllerLabel = $controllerName;
-                break;
-            }
+            $controllerNamesToLabels = [
+                'item' => 'items',
+                'item-set' => 'item sets',
+            ];
+            $controllerLabel = $controllerNamesToLabels[$controllerName] ?? $controllerName;
+
             $html = $params['html'];
-            $globalSettings = $this->getServiceLocator()->get('Omeka\Settings');
-            if ($globalSettings->get('metadata_browse_direct_links') && $isLiteral == true) {
+            if ($isLiteral && $globalSettings->get('metadata_browse_direct_links')) {
                 $link = $hyperlink->raw($html, $searchUrl, ['class' => 'metadata-browse-direct-link']);
                 $event->setParam('html', $link);
             } else {
