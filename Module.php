@@ -157,7 +157,13 @@ class Module extends AbstractModule
             $target = $event->getTarget();
         }
 
-        $controllerName = $target->resource()->getControllerName();
+        // Value annotations are currently not managed.
+        $resource = $target->resource();
+        if (!$resource) {
+            return;
+        }
+
+        $controllerName = $resource->getControllerName();
         if (!$controllerName) {
             return;
         }
@@ -244,10 +250,10 @@ class Module extends AbstractModule
                         $isLiteral = true;
                         break;
                     default:
-                        $resource = $target->valueResource();
+                        $valueResource = $target->valueResource();
                         $uri = $target->uri();
-                        if ($resource) {
-                            $searchTarget = $target->valueResource()->id();
+                        if ($valueResource) {
+                            $searchTarget = $valueResource->id();
                             $searchUrl = $this->resourceSearchUrl($url, $routeParams, $propertyId, $searchTarget);
                         } elseif ($uri) {
                             $searchUrl = $this->uriSearchUrl($url, $routeParams, $propertyId, $uri);
